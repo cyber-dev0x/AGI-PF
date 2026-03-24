@@ -53,9 +53,8 @@ Execution Layer       -> Position sizing, order routing, transaction writing
 Risk Layer            -> Drawdown gates, reserve controls, rebalance triggers
 Observability Layer   -> AGI PF dashboards, docs, exports, and audit log`}        </div>
         <p>
-          In this build, the runtime ships in autonomous demo mode with deterministic market simulation and full control
-          flow. The same state model is designed to attach live adapters (RPC, DEX, and wallet signers) without changing
-          the user-facing interface.
+          This build runs in live-data mode. Prices and 24h moves are sourced from CoinGecko, on-chain balances and
+          signatures come from Solana RPC, and unknown SPL token quotes are resolved through DexScreener when available.
         </p>
       </section>
 
@@ -91,10 +90,10 @@ Observability Layer   -> AGI PF dashboards, docs, exports, and audit log`}      
         <h3>Operator Guide</h3>
         <ol>
           <li>Use <strong>Pause Runtime</strong> to freeze autonomous ticks.</li>
-          <li>Use <strong>Force Trade</strong> to immediately execute one additional strategy step.</li>
-          <li>Use <strong>Rebalance Risk</strong> to reduce concentrated exposure.</li>
-          <li>Use <strong>Export CSV</strong> to download a full transaction ledger.</li>
-          <li>Use <strong>Reset Demo</strong> to restart from initial capital and positions.</li>
+          <li>Use <strong>Force Trade</strong> to force an immediate live refresh from APIs.</li>
+          <li>Use <strong>Rebalance Risk</strong> to recompute risk state from latest market data.</li>
+          <li>Use <strong>Export CSV</strong> to download the on-chain transaction feed snapshot.</li>
+          <li>Use <strong>Reset Demo</strong> to reset local UI state and fetch fresh live data.</li>
         </ol>
       </section>
 
@@ -113,7 +112,7 @@ Observability Layer   -> AGI PF dashboards, docs, exports, and audit log`}      
         <ol>
           <li>Attach signed wallet adapter for transaction broadcasting.</li>
           <li>Connect live Solana RPC + DEX routing adapters.</li>
-          <li>Replace simulation price feed with real market streams.</li>
+          <li>Replace current read-only refresh controls with signed execution commands.</li>
           <li>Introduce persistence (PostgreSQL + append-only audit events).</li>
           <li>Deploy alerting and policy engine for hard safety constraints.</li>
         </ol>

@@ -25,21 +25,18 @@ The platform is built for visibility and operator control:
 
 ## Runtime Model
 
-The app ships with an autonomous runtime engine:
-- periodic market ticks,
-- dynamic token repricing,
-- autonomous buy/sell decisions,
-- confidence/mood updates,
-- equity and drawdown recomputation,
-- thought-stream logging.
-
-Current implementation runs in **autonomous demo mode** with full execution state simulation and operator controls. The data model is designed so live adapters can replace simulation feeds without changing UI contracts.
+The app runs in **live data mode**:
+- real token prices and 24h change from CoinGecko,
+- on-chain wallet balances and signatures from Solana RPC,
+- unknown SPL token quote fallback from DexScreener,
+- live confidence/mood/risk recomputation from fetched telemetry,
+- continuous equity and position refresh.
 
 ## Operator Controls
 
 From the right-side runtime panel:
 - `Pause/Resume Runtime`
-- `Force Trade`
+- `Force Sync`
 - `Rebalance Risk`
 - `Export CSV`
 - `Reset Demo`

@@ -52,12 +52,12 @@ export default function DashboardPage() {
 
     if (action === 'trade') {
       forceTrade();
-      setControlStatus('Manual trade cycle executed.');
+      setControlStatus('Live market snapshot refreshed.');
       return;
     }
 
     rebalanceRisk();
-    setControlStatus('Risk rebalance cycle executed.');
+    setControlStatus('Risk model recalculated from live data.');
   };
 
   return (
@@ -65,10 +65,10 @@ export default function DashboardPage() {
       <motion.section className="panel panel-pad hero-grid" variants={reveal} initial="hidden" animate="visible" transition={{ duration: 0.42 }}>
         <div className="hero-copy">
           <span className="kicker">AGI Trading Intelligence</span>
-          <h1 className="headline">Milly executes autonomous Solana meme-coin strategies in live runtime.</h1>
+          <h1 className="headline">Milly monitors live Solana wallet telemetry and market state in real time.</h1>
           <p>
-            AGI PF gives full visibility into Milly&apos;s wallet state, autonomous execution logic, and equity progression.
-            You can inspect every transaction, monitor confidence shifts, and trigger risk controls in real time.
+            AGI PF now streams real wallet balances, on-chain signatures, and current token prices from external market
+            feeds. You can inspect every update cycle, monitor confidence shifts, and trigger manual sync controls.
           </p>
 
           <div className="hero-badges">
@@ -95,7 +95,7 @@ export default function DashboardPage() {
               aria-pressed={activeControl === 'trade'}
             >
               <Bot size={15} />
-              Trigger Trade
+              Trigger Sync
             </button>
             <button
               className={`runtime-btn ${activeControl === 'rebalance' ? 'runtime-btn-primary runtime-btn-active' : ''}`}

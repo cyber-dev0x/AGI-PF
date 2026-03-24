@@ -5,7 +5,7 @@ export const PROJECT_NAME = 'AGI PF';
 export const CHAIN = 'Solana Mainnet';
 export const SOLSCAN_ROOT = 'https://solscan.io';
 
-export const MILLY_PUBLIC_KEY = '9Vn6nUqDa3tFGY9SwM2n4Z8KJDhf5xQw1R4aLp7YyM1i';
+export const MILLY_PUBLIC_KEY = 'VQwCCSfW3o5NDx7n5FBr9SoYiLXVgetstHvaWBvv2YH';
 
 export const TOKEN_UNIVERSE: TokenSpec[] = [
   {

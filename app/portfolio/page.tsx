@@ -70,7 +70,7 @@ export default function PortfolioPage() {
 
       <section className="panel panel-pad">
         <h2 className="panel-title">Open Positions</h2>
-        <p className="panel-subtitle">Mark-to-market values with unrealized performance and address mapping.</p>
+        <p className="panel-subtitle">Mark-to-market values with 24h delta reference and address mapping.</p>
 
         <div className="table-wrap">
           <table className="data-table">
@@ -78,10 +78,10 @@ export default function PortfolioPage() {
               <tr>
                 <th>Token</th>
                 <th>Amount</th>
-                <th>Avg Entry</th>
+                <th>Ref Price (24h)</th>
                 <th>Current</th>
                 <th>Value</th>
-                <th>Unrealized</th>
+                <th>24h Delta</th>
                 <th>Address</th>
               </tr>
             </thead>

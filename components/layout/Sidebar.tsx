@@ -81,7 +81,7 @@ export function Sidebar() {
             label={runtimeOn ? 'Pause Runtime' : 'Resume Runtime'}
             variant="primary"
           />
-          <RuntimeButton onClick={forceTrade} icon={<Sparkles size={15} />} label="Force Trade" />
+          <RuntimeButton onClick={forceTrade} icon={<Sparkles size={15} />} label="Force Sync" />
           <RuntimeButton onClick={rebalanceRisk} icon={<Gauge size={15} />} label="Rebalance Risk" />
           <RuntimeButton onClick={exportTransactionsCsv} icon={<Download size={15} />} label="Export CSV" />
           <RuntimeButton onClick={resetDemo} icon={<RefreshCw size={15} />} label="Reset Demo" />

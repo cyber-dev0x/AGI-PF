@@ -25,7 +25,7 @@ export default function TransactionsPage() {
       <section className="panel panel-pad">
         <h1 className="panel-title">Transaction Log</h1>
         <p className="panel-subtitle">
-          Full autonomous execution history with rationale, realized PnL, confidence score, and direct Solscan links.
+          Live on-chain transaction feed with status-derived flow metrics and direct Solscan links.
         </p>
 
         <div className="filters">
