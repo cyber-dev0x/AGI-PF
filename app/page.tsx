@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { ArrowUpRight, Bot, ShieldCheck, Zap } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMillyRuntime } from '@/components/runtime/MillyRuntimeProvider';
 import { NeuralCore } from '@/components/visuals/NeuralCore';
 import { formatPrice, formatSigned, formatUSD, moodBg, moodColor, shortSignature, timeAgo } from '@/lib/utils';
@@ -37,9 +37,22 @@ export default function DashboardPage() {
   } = useMillyRuntime();
   const [activeControl, setActiveControl] = useState<ControlAction>('runtime');
   const [controlStatus, setControlStatus] = useState('Control panel ready.');
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const topTransactions = transactions.slice(0, 6);
   const topThoughts = thoughts.slice(0, 7);
+  const lastSyncLabel = useMemo(() => {
+    const latestPoint = equitySeries[equitySeries.length - 1];
+    if (!latestPoint) return 'Sync: pending';
+
+    const ageSec = Math.max(0, Math.floor((nowMs - new Date(latestPoint.timestamp).getTime()) / 1000));
+    return ageSec < 2 ? 'Sync: just now' : `Sync: ${ageSec}s ago`;
+  }, [equitySeries, nowMs]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const handleControl = (action: ControlAction) => {
     setActiveControl(action);
@@ -76,6 +89,7 @@ export default function DashboardPage() {
             <span className="hero-badge">Confidence: {confidence}%</span>
             <span className="hero-badge">Runtime: {runtimeOn ? 'Live' : 'Paused'}</span>
             <span className="hero-badge">SOL: {prices.SOL ? formatPrice(prices.SOL) : 'N/A'}</span>
+            <span className="hero-badge">{lastSyncLabel}</span>
           </div>
 
           <div className="hero-badges hero-controls">

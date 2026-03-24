@@ -9,6 +9,9 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatUSD(value: number, decimals = 2): string {
   const abs = Math.abs(value);
+  if (abs === 0) return '$0.00';
+  if (abs < 0.01) return `$${value.toFixed(6)}`;
+  if (abs < 1) return `$${value.toFixed(4)}`;
   if (abs >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
   if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
   if (abs >= 1_000) return `$${(value / 1_000).toFixed(2)}K`;
@@ -24,6 +27,9 @@ export function formatPrice(value: number): string {
 
 export function formatAmount(value: number): string {
   const abs = Math.abs(value);
+  if (abs === 0) return '0.00';
+  if (abs < 0.01) return value.toFixed(6);
+  if (abs < 1) return value.toFixed(4);
   if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
   if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
   if (abs >= 1_000) return `${(value / 1_000).toFixed(2)}K`;

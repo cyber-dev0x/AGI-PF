@@ -119,7 +119,7 @@ export function MillyRuntimeProvider({ children }: { children: React.ReactNode }
       const prevSeries = prev.equitySeries.length > 0 ? prev.equitySeries : [{ timestamp: new Date(), equityUsd: payload.wallet.totalEquityUsd }];
       const shouldAppend =
         prevSeries[prevSeries.length - 1]?.equityUsd !== nextPoint.equityUsd ||
-        Math.abs(new Date(prevSeries[prevSeries.length - 1].timestamp).getTime() - nextPoint.timestamp.getTime()) > 10_000;
+        Math.abs(new Date(prevSeries[prevSeries.length - 1].timestamp).getTime() - nextPoint.timestamp.getTime()) > 4_000;
 
       const equitySeries = shouldAppend ? [...prevSeries, nextPoint].slice(-320) : prevSeries;
 
@@ -171,7 +171,7 @@ export function MillyRuntimeProvider({ children }: { children: React.ReactNode }
 
     const timer = window.setInterval(() => {
       refreshLiveData().catch(() => undefined);
-    }, 25_000);
+    }, 7_000);
 
     return () => window.clearInterval(timer);
   }, [snapshot.runtimeOn, refreshLiveData]);
