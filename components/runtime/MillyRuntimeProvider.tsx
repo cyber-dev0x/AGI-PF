@@ -6,6 +6,7 @@ import { transactionsToCsv } from '@/lib/runtime-engine';
 import { RuntimeContextValue, RuntimeSnapshot } from '@/lib/types';
 
 const RuntimeContext = createContext<RuntimeContextValue | null>(null);
+const SNAPSHOT_CACHE_KEY = 'milly-live-snapshot-v1';
 
 const EMPTY_SNAPSHOT: RuntimeSnapshot = {
   wallet: {
@@ -37,9 +38,46 @@ const EMPTY_SNAPSHOT: RuntimeSnapshot = {
   },
 };
 
-type LiveSnapshotPayload = Omit<RuntimeSnapshot, 'runtimeOn' | 'equitySeries'> & {
+type ApiTransaction = RuntimeSnapshot['transactions'][number] & { timestamp: string | Date };
+type ApiThought = RuntimeSnapshot['thoughts'][number] & { timestamp: string | Date };
+
+type LiveSnapshotPayload = Omit<RuntimeSnapshot, 'runtimeOn' | 'equitySeries' | 'transactions' | 'thoughts'> & {
+  transactions: ApiTransaction[];
+  thoughts: ApiThought[];
   fetchedAt: string;
 };
+
+function normalizePayload(payload: LiveSnapshotPayload): Omit<RuntimeSnapshot, 'runtimeOn' | 'equitySeries'> {
+  return {
+    ...payload,
+    transactions: payload.transactions.map((tx) => ({
+      ...tx,
+      timestamp: new Date(tx.timestamp),
+    })),
+    thoughts: payload.thoughts.map((thought) => ({
+      ...thought,
+      timestamp: new Date(thought.timestamp),
+    })),
+  };
+}
+
+function persistSnapshot(payload: LiveSnapshotPayload): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(payload));
+}
+
+function readPersistedSnapshot(): LiveSnapshotPayload | null {
+  if (typeof window === 'undefined') return null;
+
+  const raw = window.localStorage.getItem(SNAPSHOT_CACHE_KEY);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as LiveSnapshotPayload;
+  } catch {
+    return null;
+  }
+}
 
 function downloadCsv(content: string, filename: string): void {
   const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
@@ -54,9 +92,24 @@ function downloadCsv(content: string, filename: string): void {
 }
 
 export function MillyRuntimeProvider({ children }: { children: React.ReactNode }) {
-  const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(EMPTY_SNAPSHOT);
+  const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(() => {
+    const persisted = readPersistedSnapshot();
+    if (!persisted) {
+      return EMPTY_SNAPSHOT;
+    }
+
+    const normalized = normalizePayload(persisted);
+    return {
+      ...EMPTY_SNAPSHOT,
+      ...normalized,
+      equitySeries: [{ timestamp: new Date(persisted.fetchedAt), equityUsd: persisted.wallet.totalEquityUsd }],
+    };
+  });
+  const [hasFreshSnapshot, setHasFreshSnapshot] = useState(false);
 
   const applyLiveSnapshot = useCallback((payload: LiveSnapshotPayload) => {
+    const normalized = normalizePayload(payload);
+
     setSnapshot((prev) => {
       const nextPoint = {
         timestamp: new Date(payload.fetchedAt),
@@ -72,7 +125,7 @@ export function MillyRuntimeProvider({ children }: { children: React.ReactNode }
 
       return {
         ...prev,
-        ...payload,
+        ...normalized,
         runtimeOn: prev.runtimeOn,
         equitySeries,
       };
@@ -86,7 +139,9 @@ export function MillyRuntimeProvider({ children }: { children: React.ReactNode }
     }
 
     const payload = (await response.json()) as LiveSnapshotPayload;
+    persistSnapshot(payload);
     applyLiveSnapshot(payload);
+    setHasFreshSnapshot(true);
   }, [applyLiveSnapshot]);
 
   useEffect(() => {
@@ -96,6 +151,18 @@ export function MillyRuntimeProvider({ children }: { children: React.ReactNode }
 
     return () => window.clearTimeout(timer);
   }, [refreshLiveData]);
+
+  useEffect(() => {
+    if (hasFreshSnapshot) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      refreshLiveData().catch(() => undefined);
+    }, 6_000);
+
+    return () => window.clearInterval(timer);
+  }, [hasFreshSnapshot, refreshLiveData]);
 
   useEffect(() => {
     if (!snapshot.runtimeOn) {

@@ -7,6 +7,10 @@ export const revalidate = 0;
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const REQUEST_TIMEOUT_MS = 8_000;
+const MARKET_CACHE_TTL_MS = 45_000;
+const MARKET_STALE_TTL_MS = 15 * 60_000;
 
 const COINGECKO_ID_BY_SYMBOL: Record<string, string> = {
   SOL: 'solana',
@@ -30,13 +34,82 @@ type DexQuote = {
 
 const dexCache = new Map<string, { value: DexQuote | null; expiresAt: number }>();
 
+type MarketData = {
+  prices: Record<string, number>;
+  changes: Record<string, number>;
+  fetchedAt: number;
+};
+
+type LiveSnapshotResponse = {
+  fetchedAt: string;
+  wallet: {
+    publicKey: string;
+    network: 'Solana Mainnet';
+    solBalance: number;
+    usdcBalance: number;
+    totalEquityUsd: number;
+    change24hPct: number;
+  };
+  prices: Record<string, number>;
+  positions: Position[];
+  transactions: TradeTransaction[];
+  thoughts: AgentThought[];
+  mood: MoodState;
+  confidence: number;
+  latencyMs: number;
+  riskLevel: 'Low' | 'Medium' | 'High';
+  metrics: RuntimeMetrics;
+  degraded?: boolean;
+  warnings?: string[];
+};
+
+let marketCache: MarketData | null = null;
+let snapshotCache: LiveSnapshotResponse | null = null;
+
+type RpcTokenAccountsResult = {
+  value: Array<{
+    account: {
+      data: {
+        parsed: {
+          info: {
+            mint: string;
+            tokenAmount: { uiAmount: number | null; uiAmountString: string; decimals: number };
+          };
+        };
+      };
+    };
+  }>;
+};
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function baseMarketData(now = Date.now()): MarketData {
+  return {
+    prices: Object.fromEntries(TOKEN_UNIVERSE.map((token) => [token.symbol, token.basePriceUsd])),
+    changes: Object.fromEntries(TOKEN_UNIVERSE.map((token) => [token.symbol, 0])),
+    fetchedAt: now,
+  };
+}
+
 async function rpcCall<T>(method: string, params: unknown[]): Promise<T> {
-  const response = await fetch(SOLANA_RPC_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    cache: 'no-store',
-  });
+  const response = await fetchWithTimeout(
+    SOLANA_RPC_URL,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      cache: 'no-store',
+    },
+    REQUEST_TIMEOUT_MS,
+  );
 
   if (!response.ok) {
     throw new Error(`RPC status ${response.status}`);
@@ -72,26 +145,72 @@ function riskFromMarket(change24hPct: number, maxDrawdownPct: number, confidence
   return 'Low';
 }
 
-async function fetchCoinGecko() {
+async function fetchCoinGecko(): Promise<{ prices: Record<string, number>; changes: Record<string, number>; warning?: string }> {
+  const now = Date.now();
+  if (marketCache && now - marketCache.fetchedAt < MARKET_CACHE_TTL_MS) {
+    return { prices: { ...marketCache.prices }, changes: { ...marketCache.changes } };
+  }
+
   const ids = Object.values(COINGECKO_ID_BY_SYMBOL).join(',');
   const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
-  const response = await fetch(url, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`CoinGecko status ${response.status}`);
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        cache: 'no-store',
+        headers: {
+          accept: 'application/json',
+          'user-agent': 'AGI-PF/1.0',
+        },
+      },
+      7_000,
+    );
+    if (!response.ok) {
+      throw new Error(`CoinGecko status ${response.status}`);
+    }
+
+    const data = (await response.json()) as Record<string, { usd?: number; usd_24h_change?: number }>;
+    const prices: Record<string, number> = {};
+    const changes: Record<string, number> = {};
+
+    for (const token of TOKEN_UNIVERSE) {
+      const id = COINGECKO_ID_BY_SYMBOL[token.symbol];
+      const row = id ? data[id] : undefined;
+      prices[token.symbol] = row?.usd ?? token.basePriceUsd;
+      changes[token.symbol] = row?.usd_24h_change ?? 0;
+    }
+
+    marketCache = {
+      prices,
+      changes,
+      fetchedAt: now,
+    };
+    return { prices, changes };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'CoinGecko unavailable';
+
+    if (marketCache && now - marketCache.fetchedAt < MARKET_STALE_TTL_MS) {
+      return {
+        prices: { ...marketCache.prices },
+        changes: { ...marketCache.changes },
+        warning: `${reason}; using cached market data`,
+      };
+    }
+
+    const fallback = baseMarketData(now);
+    const solDex = await fetchDexQuote(SOL_MINT);
+    if (solDex && Number.isFinite(solDex.priceUsd) && solDex.priceUsd > 0) {
+      fallback.prices.SOL = solDex.priceUsd;
+      fallback.changes.SOL = solDex.change24hPct;
+    }
+
+    marketCache = fallback;
+    return {
+      prices: { ...fallback.prices },
+      changes: { ...fallback.changes },
+      warning: `${reason}; using fallback market data`,
+    };
   }
-
-  const data = (await response.json()) as Record<string, { usd?: number; usd_24h_change?: number }>;
-  const prices: Record<string, number> = {};
-  const changes: Record<string, number> = {};
-
-  for (const token of TOKEN_UNIVERSE) {
-    const id = COINGECKO_ID_BY_SYMBOL[token.symbol];
-    const row = id ? data[id] : undefined;
-    prices[token.symbol] = row?.usd ?? token.basePriceUsd;
-    changes[token.symbol] = row?.usd_24h_change ?? 0;
-  }
-
-  return { prices, changes };
 }
 
 async function fetchDexQuote(mint: string): Promise<DexQuote | null> {
@@ -261,85 +380,101 @@ function buildThoughts(
 export async function GET() {
   const startedAt = Date.now();
   const owner = process.env.MILLY_WALLET_ADDRESS ?? MILLY_PUBLIC_KEY;
+  const warnings: string[] = [];
 
   try {
-    const { prices, changes } = await fetchCoinGecko();
+    const market = await fetchCoinGecko();
+    if (market.warning) {
+      warnings.push(market.warning);
+    }
 
-    const [balanceResult, tokenAccountsResult] = await Promise.all([
+    const prices = market.prices;
+    const changes = market.changes;
+
+    const [balanceSettled, tokenAccountsSettled] = await Promise.allSettled([
       rpcCall<{ value: number }>('getBalance', [owner]),
-      rpcCall<{
-        value: Array<{
-          account: {
-            data: {
-              parsed: {
-                info: {
-                  mint: string;
-                  tokenAmount: { uiAmount: number | null; uiAmountString: string; decimals: number };
-                };
-              };
-            };
-          };
-        }>;
-      }>('getTokenAccountsByOwner', [owner, { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' }, { encoding: 'jsonParsed' }]),
+      rpcCall<RpcTokenAccountsResult>('getTokenAccountsByOwner', [
+        owner,
+        { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
+        { encoding: 'jsonParsed' },
+      ]),
     ]);
 
-    const solBalance = (balanceResult.value ?? 0) / 1_000_000_000;
+    if (balanceSettled.status === 'rejected') {
+      warnings.push(`RPC getBalance failed; ${balanceSettled.reason instanceof Error ? balanceSettled.reason.message : 'unknown error'}`);
+    }
+    if (tokenAccountsSettled.status === 'rejected') {
+      warnings.push(
+        `RPC getTokenAccountsByOwner failed; ${tokenAccountsSettled.reason instanceof Error ? tokenAccountsSettled.reason.message : 'unknown error'}`,
+      );
+    }
+
+    const solBalance =
+      balanceSettled.status === 'fulfilled'
+        ? (balanceSettled.value.value ?? 0) / 1_000_000_000
+        : snapshotCache?.wallet.solBalance ?? 0;
     const solPrice = prices.SOL ?? TOKEN_UNIVERSE.find((token) => token.symbol === 'SOL')?.basePriceUsd ?? 0;
 
-    let usdcBalance = 0;
-    const positions: Position[] = [];
-    const changeSeries: number[] = [];
+    let usdcBalance = tokenAccountsSettled.status === 'fulfilled' ? 0 : snapshotCache?.wallet.usdcBalance ?? 0;
+    const positions: Position[] =
+      tokenAccountsSettled.status === 'fulfilled' ? [] : snapshotCache?.positions ? [...snapshotCache.positions] : [];
+    const changeSeries: number[] =
+      tokenAccountsSettled.status === 'fulfilled' ? [] : positions.map((position) => position.unrealizedPnlPct);
 
-    for (const account of tokenAccountsResult.value) {
-      const parsedInfo = account.account.data.parsed.info;
-      const mint = parsedInfo.mint;
-      const amount = parsedInfo.tokenAmount.uiAmount ?? Number(parsedInfo.tokenAmount.uiAmountString || 0);
-      if (!amount || amount <= 0) continue;
+    if (tokenAccountsSettled.status === 'fulfilled') {
+      const shouldUseDexForKnownTokens = Boolean(market.warning);
 
-      if (mint === USDC_MINT) {
-        usdcBalance += amount;
-        continue;
-      }
+      for (const account of tokenAccountsSettled.value.value) {
+        const parsedInfo = account.account.data.parsed.info;
+        const mint = parsedInfo.mint;
+        const amount = parsedInfo.tokenAmount.uiAmount ?? Number(parsedInfo.tokenAmount.uiAmountString || 0);
+        if (!amount || amount <= 0) continue;
 
-      const known = tokenByMint.get(mint);
-      let symbol = known?.symbol;
-      let name = known?.name;
-      let priceUsd = known ? prices[known.symbol] : undefined;
-      let change24hPct = known ? changes[known.symbol] : undefined;
-
-      if (priceUsd === undefined || !Number.isFinite(priceUsd) || priceUsd <= 0) {
-        const dex = await fetchDexQuote(mint);
-        if (dex) {
-          priceUsd = dex.priceUsd;
-          change24hPct = dex.change24hPct;
-          symbol = symbol ?? dex.symbol;
-          name = name ?? dex.name;
+        if (mint === USDC_MINT) {
+          usdcBalance += amount;
+          continue;
         }
+
+        const known = tokenByMint.get(mint);
+        let symbol = known?.symbol;
+        let name = known?.name;
+        let priceUsd = known ? prices[known.symbol] : undefined;
+        let change24hPct = known ? changes[known.symbol] : undefined;
+
+        if (shouldUseDexForKnownTokens || priceUsd === undefined || !Number.isFinite(priceUsd) || priceUsd <= 0) {
+          const dex = await fetchDexQuote(mint);
+          if (dex) {
+            priceUsd = dex.priceUsd;
+            change24hPct = dex.change24hPct;
+            symbol = symbol ?? dex.symbol;
+            name = name ?? dex.name;
+          }
+        }
+
+        if (!priceUsd || priceUsd <= 0) {
+          continue;
+        }
+
+        const tokenChange = change24hPct ?? 0;
+        const referencePrice = tokenChange === -100 ? priceUsd : priceUsd / (1 + tokenChange / 100);
+        const valueUsd = amount * priceUsd;
+        const unrealizedPnlUsd = amount * (priceUsd - referencePrice);
+        const unrealizedPnlPct = tokenChange;
+
+        positions.push({
+          symbol: symbol ?? `${mint.slice(0, 4)}...${mint.slice(-4)}`,
+          name: name ?? 'Unmapped Token',
+          address: mint,
+          amount,
+          avgEntryUsd: referencePrice,
+          currentPriceUsd: priceUsd,
+          valueUsd,
+          unrealizedPnlUsd,
+          unrealizedPnlPct,
+        });
+
+        changeSeries.push(tokenChange);
       }
-
-      if (!priceUsd || priceUsd <= 0) {
-        continue;
-      }
-
-      const tokenChange = change24hPct ?? 0;
-      const referencePrice = tokenChange === -100 ? priceUsd : priceUsd / (1 + tokenChange / 100);
-      const valueUsd = amount * priceUsd;
-      const unrealizedPnlUsd = amount * (priceUsd - referencePrice);
-      const unrealizedPnlPct = tokenChange;
-
-      positions.push({
-        symbol: symbol ?? `${mint.slice(0, 4)}...${mint.slice(-4)}`,
-        name: name ?? 'Unmapped Token',
-        address: mint,
-        amount,
-        avgEntryUsd: referencePrice,
-        currentPriceUsd: priceUsd,
-        valueUsd,
-        unrealizedPnlUsd,
-        unrealizedPnlPct,
-      });
-
-      changeSeries.push(tokenChange);
     }
 
     positions.sort((a, b) => b.valueUsd - a.valueUsd);
@@ -372,34 +507,48 @@ export async function GET() {
 
     const mood = moodFromMarket(change24hPct, metrics.winRatePct);
     const riskLevel = riskFromMarket(change24hPct, metrics.maxDrawdownPct, confidence);
-    const transactions = await fetchTransactions(owner, solPrice, mood);
+    let transactions = snapshotCache?.transactions ? [...snapshotCache.transactions] : [];
+
+    try {
+      transactions = await fetchTransactions(owner, solPrice, mood);
+    } catch (error) {
+      warnings.push(
+        `RPC transactions fetch failed; ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+
     metrics.totalTrades = transactions.length;
 
     const thoughts = buildThoughts(mood, change24hPct, solPrice, strongest, weakest);
 
     const latencyMs = Date.now() - startedAt;
+    const responseBody: LiveSnapshotResponse = {
+      fetchedAt: new Date().toISOString(),
+      wallet: {
+        publicKey: owner,
+        network: 'Solana Mainnet',
+        solBalance: round(solBalance, 6),
+        usdcBalance: round(usdcBalance, 2),
+        totalEquityUsd: round(totalEquityUsd, 2),
+        change24hPct: round(change24hPct, 2),
+      },
+      prices,
+      positions,
+      transactions,
+      thoughts,
+      mood,
+      confidence,
+      latencyMs,
+      riskLevel,
+      metrics,
+      degraded: warnings.length > 0,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
+
+    snapshotCache = responseBody;
 
     return NextResponse.json(
-      {
-        fetchedAt: new Date().toISOString(),
-        wallet: {
-          publicKey: owner,
-          network: 'Solana Mainnet',
-          solBalance: round(solBalance, 6),
-          usdcBalance: round(usdcBalance, 2),
-          totalEquityUsd: round(totalEquityUsd, 2),
-          change24hPct: round(change24hPct, 2),
-        },
-        prices,
-        positions,
-        transactions,
-        thoughts,
-        mood,
-        confidence,
-        latencyMs,
-        riskLevel,
-        metrics,
-      },
+      responseBody,
       {
         headers: {
           'Cache-Control': 'no-store, max-age=0',
@@ -407,12 +556,66 @@ export async function GET() {
       },
     );
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: 'Failed to fetch live snapshot',
-        details: error instanceof Error ? error.message : 'Unknown error',
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    if (snapshotCache) {
+      return NextResponse.json(
+        {
+          ...snapshotCache,
+          fetchedAt: new Date().toISOString(),
+          degraded: true,
+          latencyMs: Date.now() - startedAt,
+          warnings: [...(snapshotCache.warnings ?? []), `Fatal API error: ${message}; serving cached snapshot`],
+        },
+        {
+          headers: {
+            'Cache-Control': 'no-store, max-age=0',
+          },
+        },
+      );
+    }
+
+    const fallbackMarket = marketCache ?? baseMarketData();
+    const emptyFallback: LiveSnapshotResponse = {
+      fetchedAt: new Date().toISOString(),
+      wallet: {
+        publicKey: owner,
+        network: 'Solana Mainnet',
+        solBalance: 0,
+        usdcBalance: 0,
+        totalEquityUsd: 0,
+        change24hPct: 0,
       },
-      { status: 500 },
+      prices: fallbackMarket.prices,
+      positions: [],
+      transactions: [],
+      thoughts: buildThoughts('Analytical', 0, fallbackMarket.prices.SOL ?? 0, null, null),
+      mood: 'Analytical',
+      confidence: 45,
+      latencyMs: Date.now() - startedAt,
+      riskLevel: 'Medium',
+      metrics: {
+        totalTrades: 0,
+        realizedPnlUsd: 0,
+        winRatePct: 0,
+        profitFactor: 0,
+        sharpeLike: 0,
+        maxDrawdownPct: 0,
+        openPositions: 0,
+      },
+      degraded: true,
+      warnings: [`Fatal API error: ${message}; serving minimal fallback snapshot`],
+    };
+
+    snapshotCache = emptyFallback;
+
+    return NextResponse.json(
+      emptyFallback,
+      {
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      },
     );
   }
 }
