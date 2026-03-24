@@ -1,8 +1,8 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { ArrowUpRight, Bot, ShieldCheck, Zap } from 'lucide-react';
-import { EquityChart } from '@/components/charts/EquityChart';
 import { useMillyRuntime } from '@/components/runtime/MillyRuntimeProvider';
 import { NeuralCore } from '@/components/visuals/NeuralCore';
 import { formatPrice, formatSigned, formatUSD, moodBg, moodColor, shortSignature, timeAgo } from '@/lib/utils';
@@ -11,6 +11,11 @@ const reveal = {
   hidden: { opacity: 0, y: 18 },
   visible: { opacity: 1, y: 0 },
 };
+
+const EquityChart = dynamic(() => import('@/components/charts/EquityChart').then((mod) => mod.EquityChart), {
+  ssr: false,
+  loading: () => <div className="scene-loading">Loading chart...</div>,
+});
 
 export default function DashboardPage() {
   const {

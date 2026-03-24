@@ -1,9 +1,18 @@
 'use client';
 
-import { AllocationDonut } from '@/components/charts/AllocationDonut';
-import { EquityChart } from '@/components/charts/EquityChart';
+import dynamic from 'next/dynamic';
 import { useMillyRuntime } from '@/components/runtime/MillyRuntimeProvider';
 import { formatAmount, formatPrice, formatSigned, formatUSD, shortAddress } from '@/lib/utils';
+
+const AllocationDonut = dynamic(() => import('@/components/charts/AllocationDonut').then((mod) => mod.AllocationDonut), {
+  ssr: false,
+  loading: () => <div className="scene-loading">Loading allocation chart...</div>,
+});
+
+const EquityChart = dynamic(() => import('@/components/charts/EquityChart').then((mod) => mod.EquityChart), {
+  ssr: false,
+  loading: () => <div className="scene-loading">Loading chart...</div>,
+});
 
 export default function PortfolioPage() {
   const { wallet, metrics, positions, equitySeries, prices } = useMillyRuntime();
