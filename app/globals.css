@@ -315,6 +315,12 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  position: relative;
+  z-index: 2;
+}
+
+.hero-controls {
+  z-index: 6;
 }
 
 .hero-badge {
@@ -556,6 +562,17 @@ a {
 .runtime-btn-primary {
   border-color: rgba(157, 255, 55, 0.56);
   background: linear-gradient(130deg, rgba(157, 255, 55, 0.28), rgba(31, 88, 15, 0.38));
+}
+
+.runtime-btn-active {
+  box-shadow: 0 0 0 1px rgba(157, 255, 55, 0.45), 0 8px 24px rgba(90, 170, 50, 0.3);
+}
+
+.control-status {
+  margin-top: -4px;
+  font-size: 0.73rem;
+  color: #9dc490;
+  min-height: 1.1rem;
 }
 
 .sidebar-metrics {

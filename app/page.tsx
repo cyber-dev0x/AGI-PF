@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { ArrowUpRight, Bot, ShieldCheck, Zap } from 'lucide-react';
+import { useState } from 'react';
 import { useMillyRuntime } from '@/components/runtime/MillyRuntimeProvider';
 import { NeuralCore } from '@/components/visuals/NeuralCore';
 import { formatPrice, formatSigned, formatUSD, moodBg, moodColor, shortSignature, timeAgo } from '@/lib/utils';
@@ -16,6 +17,8 @@ const EquityChart = dynamic(() => import('@/components/charts/EquityChart').then
   ssr: false,
   loading: () => <div className="scene-loading">Loading chart...</div>,
 });
+
+type ControlAction = 'runtime' | 'trade' | 'rebalance';
 
 export default function DashboardPage() {
   const {
@@ -32,9 +35,30 @@ export default function DashboardPage() {
     forceTrade,
     rebalanceRisk,
   } = useMillyRuntime();
+  const [activeControl, setActiveControl] = useState<ControlAction>('runtime');
+  const [controlStatus, setControlStatus] = useState('Control panel ready.');
 
   const topTransactions = transactions.slice(0, 6);
   const topThoughts = thoughts.slice(0, 7);
+
+  const handleControl = (action: ControlAction) => {
+    setActiveControl(action);
+
+    if (action === 'runtime') {
+      toggleRuntime();
+      setControlStatus(runtimeOn ? 'Runtime paused.' : 'Runtime resumed.');
+      return;
+    }
+
+    if (action === 'trade') {
+      forceTrade();
+      setControlStatus('Manual trade cycle executed.');
+      return;
+    }
+
+    rebalanceRisk();
+    setControlStatus('Risk rebalance cycle executed.');
+  };
 
   return (
     <>
@@ -54,20 +78,37 @@ export default function DashboardPage() {
             <span className="hero-badge">SOL: {prices.SOL ? formatPrice(prices.SOL) : 'N/A'}</span>
           </div>
 
-          <div className="hero-badges">
-            <button className="runtime-btn runtime-btn-primary" type="button" onClick={toggleRuntime}>
+          <div className="hero-badges hero-controls">
+            <button
+              className={`runtime-btn ${activeControl === 'runtime' ? 'runtime-btn-primary runtime-btn-active' : ''}`}
+              type="button"
+              onClick={() => handleControl('runtime')}
+              aria-pressed={activeControl === 'runtime'}
+            >
               <Zap size={15} />
               {runtimeOn ? 'Pause Runtime' : 'Resume Runtime'}
             </button>
-            <button className="runtime-btn" type="button" onClick={forceTrade}>
+            <button
+              className={`runtime-btn ${activeControl === 'trade' ? 'runtime-btn-primary runtime-btn-active' : ''}`}
+              type="button"
+              onClick={() => handleControl('trade')}
+              aria-pressed={activeControl === 'trade'}
+            >
               <Bot size={15} />
               Trigger Trade
             </button>
-            <button className="runtime-btn" type="button" onClick={rebalanceRisk}>
+            <button
+              className={`runtime-btn ${activeControl === 'rebalance' ? 'runtime-btn-primary runtime-btn-active' : ''}`}
+              type="button"
+              onClick={() => handleControl('rebalance')}
+              aria-pressed={activeControl === 'rebalance'}
+            >
               <ShieldCheck size={15} />
               Rebalance Risk
             </button>
           </div>
+
+          <div className="control-status mono">{controlStatus}</div>
         </div>
 
         <div className="panel panel-pad" style={{ background: moodBg(mood), borderColor: `${moodColor(mood)}66` }}>
